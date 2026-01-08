@@ -3,7 +3,7 @@ const { initializeApp } = require('firebase/app');
 const { getDatabase, ref, set, push } = require('firebase/database');
 
 const firebaseConfig = {
-  databaseURL: "https://your-project-id.firebaseio.com"
+  databaseURL: "https://tg-token-finder-default-rtdb.firebaseio.com"
 };
 
 const app = initializeApp(firebaseConfig);

@@ -1,9 +1,12 @@
 {
-  "name": "telegram-bot-scanner",
+  "name": "youtube-auto-reply",
   "version": "1.0.0",
+  "description": "YouTube Auto Reply System",
   "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
-    "node-fetch": "^2.6.7",
-    "firebase": "^10.7.1"
+    "googleapis": "^128.0.0"
   }
 }

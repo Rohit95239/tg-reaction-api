@@ -1,199 +1,126 @@
-const { google } = require('googleapis');
+import fetch from "node-fetch"
 
-const oauth2Client = new google.auth.OAuth2(
-  '360046090898-rsp1okgmef2f82htuhm5jhvmf78p7n3c.apps.googleusercontent.com',
-  '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',
-  process.env.REDIRECT_URI || 'https://tg-token-finder.vercel.app/callback'
-);
+const MAIN_BOT_TOKEN="8586460757:AAGX9K3yT-44wXNkPHD5IEQ79UsqM7QG7m4"
+const DB="https://tg-token-finder-default-rtdb.firebaseio.com"
 
-oauth2Client.setCredentials({
-  refresh_token: process.env.YOUTUBE_REFRESH_TOKEN
-});
+const POS=["👍","❤","🔥","🥰","👏","🎉","💯","😍","🤩","⚡"]
+const NEG=["👎","🤬","💔","🤮","💩","😡","😢"]
 
-const youtube = google.youtube({
-  version: 'v3',
-  auth: oauth2Client
-});
+const api=(t,m,d)=>fetch("https://api.telegram.org/bot"+t+"/"+m,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)})
+const get=p=>fetch(DB+p+".json").then(r=>r.json())
+const set=(p,d)=>fetch(DB+p+".json",{method:"PUT",body:JSON.stringify(d)})
+const del=p=>fetch(DB+p+".json",{method:"DELETE"})
 
-async function getVideoComments(videoId) {
-  try {
-    const response = await youtube.commentThreads.list({
-      part: 'snippet',
-      videoId: videoId,
-      maxResults: 100,
-      order: 'time'
-    });
-    return response.data.items || [];
-  } catch (error) {
-    console.error('Error fetching comments:', error.message);
-    return [];
-  }
+const rnd=(a,w)=>{
+ if(!w)return a[Math.floor(Math.random()*a.length)]
+ let s=w.reduce((x,y)=>x+y,0),r=Math.random()*s
+ for(let i=0;i<a.length;i++){if(r<w[i])return a[i];r-=w[i]}
+ return a[0]
 }
 
-async function replyToComment(commentId, replyText) {
-  try {
-    const response = await youtube.comments.insert({
-      part: 'snippet',
-      requestBody: {
-        snippet: {
-          parentId: commentId,
-          textOriginal: replyText
-        }
-      }
-    });
-    return response.data;
-  } catch (error) {
-    console.error('Error replying to comment:', error.message);
-    return null;
+const sleep=m=>new Promise(r=>setTimeout(r,m))
+
+const react=(t,c,m,e)=>fetch("https://api.telegram.org/bot"+t+"/setMessageReaction",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:c,message_id:m,reaction:e.map(x=>({type:"emoji",emoji:x}))})})
+
+export default async(req,res)=>{
+ if(req.method!=="POST")return res.end("OK")
+ const u=req.body
+
+ if(u.message){
+  const c=u.message.chat.id
+  const t=u.message.text||""
+  const mid=u.message.message_id
+
+  if(t==="/start"){
+   await api(MAIN_BOT_TOKEN,"sendMessage",{chat_id:c,text:"Reaction system online",reply_markup:{inline_keyboard:[
+    [{text:"Settings",callback_data:"settings"}],
+    [{text:"Backup",callback_data:"backup"}],
+    [{text:"Reset",callback_data:"reset"}]
+   ]}})
   }
+
+  if(t==="/test"){
+   const l=await get("/last")
+   if(l)await react(MAIN_BOT_TOKEN,l.chat,l.msg,[rnd(POS)])
+  }
+
+  if(t.startsWith("/add ")){
+   const b=t.split(" ")[1]
+   await set("/bots/"+b.replace(/\W/g,""),{token:b})
+   await api(MAIN_BOT_TOKEN,"sendMessage",{chat_id:c,text:"Bot added",reply_to_message_id:mid})
+  }
+
+  if(t.startsWith("/remove ")){
+   const b=t.split(" ")[1]
+   await del("/bots/"+b.replace(/\W/g,""))
+   await api(MAIN_BOT_TOKEN,"sendMessage",{chat_id:c,text:"Bot removed",reply_to_message_id:mid})
+  }
+ }
+
+ if(u.callback_query){
+  const q=u.callback_query
+  const c=q.message.chat.id
+  const m=q.message.message_id
+
+  if(q.data==="reset"){
+   await del("/channels/"+c)
+   await api(MAIN_BOT_TOKEN,"editMessageText",{chat_id:c,message_id:m,text:"All rules cleared"})
+  }
+
+  if(q.data==="backup"){
+   const cfg=await get("/channels/"+c)||{}
+   await api(MAIN_BOT_TOKEN,"editMessageText",{chat_id:c,message_id:m,text:JSON.stringify(cfg)})
+  }
+
+  if(q.data==="settings"){
+   await api(MAIN_BOT_TOKEN,"editMessageText",{chat_id:c,message_id:m,text:"Configure reactions",reply_markup:{inline_keyboard:[
+    [{text:"Positive",callback_data:"pos"}],
+    [{text:"Negative",callback_data:"neg"}],
+    [{text:"Mixed",callback_data:"mix"}]
+   ]}})
+  }
+
+  if(["pos","neg","mix"].includes(q.data)){
+   await set("/channels/"+c+"/mode",q.data)
+   await api(MAIN_BOT_TOKEN,"editMessageText",{chat_id:c,message_id:m,text:"Mode saved"})
+  }
+ }
+
+ if(u.channel_post){
+  const p=u.channel_post
+  const chat=p.chat.id
+  const msg=p.message_id
+  const cfg=await get("/channels/"+chat)||{}
+  const bots=await get("/bots")||{}
+  const txt=p.text||""
+
+  if(cfg.night && new Date().getHours()<6)return res.end("OK")
+  if(cfg.textOnly && !p.text)return res.end("OK")
+  if(cfg.mediaOnly && !p.photo && !p.video)return res.end("OK")
+  if(cfg.skipPoll && p.poll)return res.end("OK")
+  if(cfg.skipForward && p.forward_from)return res.end("OK")
+  if(cfg.prob && Math.random()>cfg.prob)return res.end("OK")
+
+  let pack=cfg.mode==="neg"?NEG:cfg.mode==="pos"?POS:[...POS,...NEG]
+  if(/http/.test(txt))pack=["🔗","🌐","⚡"]
+  if(/#/.test(txt))pack=["🏷","🔥","📢"]
+  if(txt.length>200)pack=["📝","👀","🤓"]
+  if(p.pinned_message)pack.push("🚀")
+
+  let cnt=cfg.multi?Math.floor(Math.random()*4)+2:1
+  let chosen=[]
+  for(let i=0;i<cnt;i++)chosen.push(rnd(pack,cfg.weight))
+
+  if(cfg.delay)await sleep(cfg.delay*1000)
+
+  try{
+   await react(MAIN_BOT_TOKEN,chat,msg,chosen)
+   for(const k in bots)await react(bots[k].token,chat,msg,chosen)
+  }catch{await set("/channels/"+chat+"/disabled",true)}
+
+  await set("/last",{chat,msg})
+  await set("/history/"+chat+"/"+msg,{emojis:chosen,time:Date.now()})
+ }
+
+ res.json({ok:true})
 }
-
-function parseConfig(configString) {
-  const configs = {};
-  const entries = configString.split('|||');
-  
-  entries.forEach(entry => {
-    const params = new URLSearchParams(entry);
-    const videoUrl = params.get('video');
-    const word = params.get('word');
-    const reply = params.get('reply');
-    
-    if (videoUrl && word && reply) {
-      const videoId = extractVideoId(videoUrl);
-      if (videoId) {
-        if (!configs[videoId]) {
-          configs[videoId] = [];
-        }
-        configs[videoId].push({
-          word: word.toLowerCase(),
-          reply: reply.replace(/\\n/g, '\n')
-        });
-      }
-    }
-  });
-  
-  return configs;
-}
-
-function extractVideoId(url) {
-  const patterns = [
-    /(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
-    /^([a-zA-Z0-9_-]{11})$/
-  ];
-  
-  for (const pattern of patterns) {
-    const match = url.match(pattern);
-    if (match) return match[1];
-  }
-  return null;
-}
-
-const processedComments = new Set();
-
-async function checkAndReply(videoId, rules) {
-  try {
-    const comments = await getVideoComments(videoId);
-    
-    for (const thread of comments) {
-      const comment = thread.snippet.topLevelComment;
-      const commentId = comment.id;
-      const commentText = comment.snippet.textDisplay.toLowerCase();
-      
-      if (processedComments.has(commentId)) continue;
-      
-      for (const rule of rules) {
-        if (commentText.includes(rule.word)) {
-          const result = await replyToComment(commentId, rule.reply);
-          if (result) {
-            processedComments.add(commentId);
-            console.log(`Replied to comment ${commentId} on video ${videoId}`);
-          }
-          break;
-        }
-      }
-    }
-  } catch (error) {
-    console.error(`Error processing video ${videoId}:`, error.message);
-  }
-}
-
-module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
-  }
-
-  if (req.method === 'GET' && req.url === '/') {
-    res.status(200).send('YouTube Auto Reply System Running');
-    return;
-  }
-
-  if (req.method === 'GET' && req.url === '/auth') {
-    const authUrl = oauth2Client.generateAuthUrl({
-      access_type: 'offline',
-      scope: ['https://www.googleapis.com/auth/youtube.force-ssl'],
-      prompt: 'consent'
-    });
-    res.status(200).json({ 
-      authUrl,
-      redirectUri: process.env.REDIRECT_URI || 'https://tg-token-finder.vercel.app/callback',
-      note: 'Make sure this redirect URI is added in Google Cloud Console'
-    });
-    return;
-  }
-
-  if (req.method === 'GET' && req.url.startsWith('/callback')) {
-    const urlParams = new URLSearchParams(req.url.split('?')[1]);
-    const code = urlParams.get('code');
-    
-    if (!code) {
-      res.status(400).json({ error: 'No code provided' });
-      return;
-    }
-
-    try {
-      const { tokens } = await oauth2Client.getToken(code);
-      res.status(200).json({ 
-        refresh_token: tokens.refresh_token,
-        access_token: tokens.access_token,
-        message: 'Add refresh_token to YOUTUBE_REFRESH_TOKEN in Vercel environment variables'
-      });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-    return;
-  }
-  
-  if (req.method === 'GET' && req.url === '/api/trigger') {
-    const configString = process.env.VIDEO_CONFIG;
-    if (!configString) {
-      res.status(500).json({ error: 'VIDEO_CONFIG not set' });
-      return;
-    }
-
-    if (!process.env.YOUTUBE_REFRESH_TOKEN) {
-      res.status(500).json({ error: 'YOUTUBE_REFRESH_TOKEN not set' });
-      return;
-    }
-    
-    const configs = parseConfig(configString);
-    let processed = 0;
-    
-    for (const [videoId, rules] of Object.entries(configs)) {
-      await checkAndReply(videoId, rules);
-      processed++;
-    }
-    
-    res.status(200).json({ 
-      message: 'Check completed',
-      videosProcessed: processed
-    });
-    return;
-  }
-  
-  res.status(404).send('Not Found');
-};

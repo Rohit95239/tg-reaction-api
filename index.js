@@ -18,8 +18,7 @@ const react=(t,c,m,e)=>fetch("https://api.telegram.org/bot"+t+"/setMessageReacti
 const mainMenu={
  inline_keyboard:[
   [{text:"🎭 Reaction Mode",callback_data:"sec_mode"},{text:"⚙ Content Filters",callback_data:"sec_filter"}],
-  [{text:"⏱ Timing Rules",callback_data:"sec_time"},{text:"🎯 Smart Logic",callback_data:"sec_smart"}],
-  [{text:"🧪 Test Reaction",callback_data:"test"}]
+  [{text:"⏱ Timing Rules",callback_data:"sec_time"},{text:"🧪 Test Reaction",callback_data:"test"}]
  ]
 }
 

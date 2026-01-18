@@ -4,7 +4,6 @@ const TOKEN="8586460757:AAGX9K3yT-44wXNkPHD5IEQ79UsqM7QG7m4"
 const DB="https://tg-token-finder-default-rtdb.firebaseio.com"
 
 const ALL=["👍","👎","❤","🔥","🥰","👏","😁","🤔","🤯","😱","🤬","😢","🎉","🤩","🤮","💩","🙏","👌","🕊","🤡","🥱","🥴","😍","🐳","❤‍🔥","🌚","🌭","💯","🤣","⚡","🍌","🏆","💔","🤨","😐","🍓","🍾","💋","🖕","😈","😴","😭","🤓","👻","👨‍💻","👀","🎃","🙈","😇","😨","🤝","✍","🤗","🫡","🎅","🎄","☃","💅","🤪","🗿","🆒","💘","🙉","🦄","😘","💊","🙊","😎","👾","🤷‍♂","🤷","🤷‍♀","😡"]
-
 const POS=ALL.filter(e=>!["👎","🤬","💔","🤮","💩","🖕","😡"].includes(e))
 const NEG=["👎","🤬","💔","🤮","💩","😡","😢","😭"]
 
@@ -30,13 +29,11 @@ export default async(req,res)=>{
 
  if(u.message){
   const c=u.message.chat.id
-  const mid=u.message.message_id
   const t=u.message.text||""
 
   if(t==="/start"){
-   await api("editMessageText",{chat_id:c,message_id:mid,text:
-   "🤖 *Auto Reaction Engine*\n\n✨ Smart reactions\n⚙ Per-channel rules\n📊 Analytics ready\n\nChoose mode 👇",
-   parse_mode:"Markdown",
+   await api("sendMessage",{chat_id:c,text:
+   "🤖 Auto Reaction Engine\n\n✨ Smart emoji reactions\n⚙ Per-channel rules\n📊 Analytics ready\n\nSelect mode 👇",
    reply_markup:{inline_keyboard:[
     [{text:"😊 Positive",callback_data:"mode_pos"}],
     [{text:"😈 Negative",callback_data:"mode_neg"}],
@@ -61,7 +58,7 @@ export default async(req,res)=>{
    const mode=q.data.split("_")[1]
    await set("/channels/"+c+"/mode",mode)
    await api("editMessageText",{chat_id:c,message_id:m,text:
-   "✅ Mode saved\n\n📌 Active features:\n• Delay\n• Probability\n• Filters\n• Multi reactions\n• Smart emoji rules"})
+   "✅ Mode activated\n\nFeatures enabled:\n• Delay\n• Probability\n• Filters\n• Multi reactions\n• Smart emoji logic"})
   }
 
   if(q.data==="reset"){
@@ -83,6 +80,7 @@ export default async(req,res)=>{
   const cfg=await get("/channels/"+chat)||{}
   const txt=p.text||""
 
+  if(cfg.disabled)return res.end("OK")
   if(cfg.night && new Date().getHours()<6)return res.end("OK")
   if(cfg.textOnly && !p.text)return res.end("OK")
   if(cfg.mediaOnly && !p.photo && !p.video)return res.end("OK")

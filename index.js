@@ -145,25 +145,26 @@ export default async(req,res)=>{
   const msg=p.message_id
   const cfg=await get("/channels/"+chat)||{}
   const bots=await get("/bots")||{}
-  const txt=p.text||""
-  const isMedia=!!(p.photo||p.video||p.document||p.audio)
+  const hasMedia=!!(p.photo||p.video||p.document||p.audio||p.animation)
+  const hasText=!!p.text
 
   const h=new Date().getHours()
   if(cfg.night_start!==undefined && cfg.night_end!==undefined){
    if(cfg.night_start<=cfg.night_end){
-    if(h>=cfg.night_start && h<hcfg.night_end)return res.end("OK")
+    if(h>=cfg.night_start && h<cfg.night_end)return res.end("OK")
    }else{
     if(h>=cfg.night_start || h<cfg.night_end)return res.end("OK")
    }
   }
 
-  if(cfg.f_text && isMedia)return res.end("OK")
-  if(cfg.f_media && !isMedia)return res.end("OK")
+  if(cfg.f_media && !hasMedia)return res.end("OK")
+  if(cfg.f_text && !hasText)return res.end("OK")
   if(cfg.f_poll && p.poll)return res.end("OK")
   if(cfg.f_fwd && p.forward_from)return res.end("OK")
   if(cfg.prob && Math.random()*100>cfg.prob)return res.end("OK")
 
   let pack=cfg.mode==="neg"?NEG:cfg.mode==="pos"?POS:[...POS,...NEG]
+  const txt=p.text||""
   if(cfg.s_link && /http/.test(txt))pack=["🔗","🌐"]
   if(cfg.s_hash && /#/.test(txt))pack=["🏷","🔥"]
   if(cfg.s_len && txt.length>200)pack=["📝","👀"]

@@ -3,19 +3,25 @@ import fetch from "node-fetch"
 const TOKEN="8586460757:AAGX9K3yT-44wXNkPHD5IEQ79UsqM7QG7m4"
 const DB="https://tg-token-finder-default-rtdb.firebaseio.com"
 
-const ALL=["👍","👎","❤","🔥","🥰","👏","😁","🤔","🤯","😱","🤬","😢","🎉","🤩","🤮","💩","🙏","👌","🕊","🤡","🥱","🥴","😍","🐳","❤‍🔥","🌚","🌭","💯","🤣","⚡","🍌","🏆","💔","🤨","😐","🍓","🍾","💋","🖕","😈","😴","😭","🤓","👻","👨‍💻","👀","🎃","🙈","😇","😨","🤝","✍","🤗","🫡","🎅","🎄","☃","💅","🤪","🗿","🆒","💘","🙉","🦄","😘","💊","🙊","😎","👾","🤷‍♂","🤷","🤷‍♀","😡"]
-const POS=ALL.filter(e=>!["👎","🤬","💔","🤮","💩","🖕","😡"].includes(e))
+const POS=["👍","❤","🔥","🥰","👏","😁","🎉","🤩","💯","⚡"]
 const NEG=["👎","🤬","💔","🤮","💩","😡","😢","😭"]
 
 const api=(t,m,d)=>fetch("https://api.telegram.org/bot"+t+"/"+m,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)})
 const get=p=>fetch(DB+p+".json").then(r=>r.json())
 const set=(p,d)=>fetch(DB+p+".json",{method:"PUT",body:JSON.stringify(d)})
 const del=p=>fetch(DB+p+".json",{method:"DELETE"})
-
 const pick=a=>a[Math.floor(Math.random()*a.length)]
 const sleep=m=>new Promise(r=>setTimeout(r,m))
 
 const react=(t,c,m,e)=>fetch("https://api.telegram.org/bot"+t+"/setMessageReaction",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat_id:c,message_id:m,reaction:e.map(x=>({type:"emoji",emoji:x}))})})
+
+const mainMenu={
+ inline_keyboard:[
+  [{text:"🎭 Mode",callback_data:"sec_mode"},{text:"⚙ Filters",callback_data:"sec_filter"}],
+  [{text:"⏱ Timing",callback_data:"sec_time"},{text:"🎯 Smart",callback_data:"sec_smart"}],
+  [{text:"🧪 Test",callback_data:"test"},{text:"♻ Reset",callback_data:"reset"}]
+ ]
+}
 
 export default async(req,res)=>{
  if(req.method!=="POST")return res.end("OK")
@@ -23,44 +29,42 @@ export default async(req,res)=>{
 
  if(u.message){
   const c=u.message.chat.id
-  const t=u.message.text||""
   const mid=u.message.message_id
+  const txt=u.message.text||""
+  const rep=u.message.reply_to_message?.text||""
 
-  if(t==="/start"){
-   await api(TOKEN,"sendMessage",{chat_id:c,reply_to_message_id:mid,text:
-   "🤖 Reaction Control Panel\n\nUse buttons to configure\n\n/add <bot_token>\n/remove <bot_token>",
-   reply_markup:{inline_keyboard:[
-    [{text:"🎭 Mode",callback_data:"sec_mode"}],
-    [{text:"⚙ Filters",callback_data:"sec_filter"}],
-    [{text:"⏱ Timing",callback_data:"sec_time"}],
-    [{text:"🎯 Smart Rules",callback_data:"sec_smart"}],
-    [{text:"♻ Reset",callback_data:"reset"}]
-   ]}})
+  if(txt==="/start"){
+   await api(TOKEN,"sendMessage",{chat_id:c,reply_to_message_id:mid,text:"🤖 Reaction Control Panel",reply_markup:mainMenu})
   }
 
-  if(t.startsWith("/add ")){
-   const bt=t.split(" ")[1]
-   if(bt){
-    await set("/bots/"+bt.replace(/\W/g,""),{token:bt})
-    await api(TOKEN,"sendMessage",{chat_id:c,reply_to_message_id:mid,text:"✅ Bot added"})
-   }
+  if(txt.startsWith("/add ")){
+   const t=txt.split(" ")[1]
+   if(t){await set("/bots/"+t.replace(/\W/g,""),{token:t});await api(TOKEN,"sendMessage",{chat_id:c,reply_to_message_id:mid,text:"✅ Bot added"})}
   }
 
-  if(t.startsWith("/remove ")){
-   const bt=t.split(" ")[1]
-   if(bt){
-    await del("/bots/"+bt.replace(/\W/g,""))
-    await api(TOKEN,"sendMessage",{chat_id:c,reply_to_message_id:mid,text:"❌ Bot removed"})
-   }
+  if(txt.startsWith("/remove ")){
+   const t=txt.split(" ")[1]
+   if(t){await del("/bots/"+t.replace(/\W/g,""));await api(TOKEN,"sendMessage",{chat_id:c,reply_to_message_id:mid,text:"❌ Bot removed"})}
   }
 
-  if(t==="/test"){
-   const l=await get("/last")
-   if(l){
-    const bots=await get("/bots")||{}
-    await react(TOKEN,l.chat,l.msg,[pick(POS)])
-    for(const k in bots)await react(bots[k].token,l.chat,l.msg,[pick(POS)])
-   }
+  if(rep==="Enter reaction delay in seconds"){
+   await set("/channels/"+c+"/delay",parseInt(txt)*1000)
+   await api(TOKEN,"sendMessage",{chat_id:c,text:"✅ Delay saved",reply_markup:mainMenu})
+  }
+
+  if(rep==="Enter night start hour (0-23)"){
+   await set("/channels/"+c+"/night_start",parseInt(txt))
+   await api(TOKEN,"sendMessage",{chat_id:c,text:"Now enter night end hour",reply_markup:{force_reply:true}})
+  }
+
+  if(rep==="Now enter night end hour"){
+   await set("/channels/"+c+"/night_end",parseInt(txt))
+   await api(TOKEN,"sendMessage",{chat_id:c,text:"🌙 Night mode saved",reply_markup:mainMenu})
+  }
+
+  if(rep==="Enter reaction probability 0-100"){
+   await set("/channels/"+c+"/prob",parseInt(txt))
+   await api(TOKEN,"sendMessage",{chat_id:c,text:"🎲 Probability saved",reply_markup:mainMenu})
   }
  }
 
@@ -68,62 +72,83 @@ export default async(req,res)=>{
   const q=u.callback_query
   const c=q.message.chat.id
   const m=q.message.message_id
+  const d=q.data
 
-  if(q.data==="sec_mode"){
-   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,text:
-   "🎭 Reaction Mode",
-   reply_markup:{inline_keyboard:[
-    [{text:"😊 Positive",callback_data:"mode_pos"}],
-    [{text:"😈 Negative",callback_data:"mode_neg"}],
-    [{text:"🎭 Mixed",callback_data:"mode_mix"}]
-   ]}})
+  const back={inline_keyboard:[[ {text:"⬅ Back",callback_data:"back"} ]]}
+
+  if(d==="back")await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,text:"🤖 Reaction Control Panel",reply_markup:mainMenu})
+
+  if(d==="sec_mode")await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,text:"🎭 Reaction Mode",reply_markup:{
+   inline_keyboard:[
+    [{text:"😊 Positive",callback_data:"mode_pos"},{text:"😈 Negative",callback_data:"mode_neg"}],
+    [{text:"🎭 Mixed",callback_data:"mode_mix"}],
+    [{text:"⬅ Back",callback_data:"back"}]
+   ]
+  }})
+
+  if(d.startsWith("mode_")){
+   await set("/channels/"+c+"/mode",d.split("_")[1])
+   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,text:"✅ Mode updated",reply_markup:back})
   }
 
-  if(q.data==="sec_filter"){
-   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,text:
-   "⚙ Filters",
-   reply_markup:{inline_keyboard:[
-    [{text:"📝 Text Only",callback_data:"f_text"}],
-    [{text:"🖼 Media Only",callback_data:"f_media"}],
-    [{text:"📊 Skip Polls",callback_data:"f_poll"}],
-    [{text:"🔁 Skip Forwards",callback_data:"f_fwd"}]
-   ]}})
+  if(d==="sec_filter")await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,text:"⚙ Filters",reply_markup:{
+   inline_keyboard:[
+    [{text:"📝 Text Only",callback_data:"f_text"},{text:"🖼 Media Only",callback_data:"f_media"}],
+    [{text:"📊 Skip Polls",callback_data:"f_poll"},{text:"🔁 Skip Forwards",callback_data:"f_fwd"}],
+    [{text:"⬅ Back",callback_data:"back"}]
+   ]
+  }})
+
+  if(d.startsWith("f_")){
+   await set("/channels/"+c+"/"+d,true)
+   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,text:"✅ Filter enabled",reply_markup:back})
   }
 
-  if(q.data==="sec_time"){
-   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,text:
-   "⏱ Timing",
-   reply_markup:{inline_keyboard:[
-    [{text:"🌙 Night Mode",callback_data:"t_night"}],
-    [{text:"🎲 Probability",callback_data:"t_prob"}],
-    [{text:"⏳ Delay",callback_data:"t_delay"}]
-   ]}})
+  if(d==="sec_time")await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,text:"⏱ Timing",reply_markup:{
+   inline_keyboard:[
+    [{text:"⏳ Delay",callback_data:"set_delay"},{text:"🌙 Night Mode",callback_data:"set_night"}],
+    [{text:"🎲 Probability",callback_data:"set_prob"}],
+    [{text:"⬅ Back",callback_data:"back"}]
+   ]
+  }})
+
+  if(d==="set_delay"){
+   await api(TOKEN,"sendMessage",{chat_id:c,text:"Enter reaction delay in seconds",reply_markup:{force_reply:true}})
   }
 
-  if(q.data==="sec_smart"){
-   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,text:
-   "🎯 Smart Rules",
-   reply_markup:{inline_keyboard:[
-    [{text:"#️⃣ Hashtag",callback_data:"s_hash"}],
-    [{text:"🔗 Link",callback_data:"s_link"}],
-    [{text:"📏 Length",callback_data:"s_len"}],
-    [{text:"📌 Pinned Boost",callback_data:"s_pin"}]
-   ]}})
+  if(d==="set_night"){
+   await api(TOKEN,"sendMessage",{chat_id:c,text:"Enter night start hour (0-23)",reply_markup:{force_reply:true}})
   }
 
-  if(q.data.startsWith("mode_")){
-   await set("/channels/"+c+"/mode",q.data.split("_")[1])
-   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,text:"✅ Mode updated"})
+  if(d==="set_prob"){
+   await api(TOKEN,"sendMessage",{chat_id:c,text:"Enter reaction probability 0-100",reply_markup:{force_reply:true}})
   }
 
-  if(q.data==="reset"){
+  if(d==="sec_smart")await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,text:"🎯 Smart Rules",reply_markup:{
+   inline_keyboard:[
+    [{text:"🔗 Link React",callback_data:"s_link"},{text:"#️⃣ Hashtag",callback_data:"s_hash"}],
+    [{text:"📏 Text Length",callback_data:"s_len"},{text:"📌 Pinned Boost",callback_data:"s_pin"}],
+    [{text:"⬅ Back",callback_data:"back"}]
+   ]
+  }})
+
+  if(d.startsWith("s_")){
+   await set("/channels/"+c+"/"+d,true)
+   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,text:"✅ Rule enabled",reply_markup:back})
+  }
+
+  if(d==="reset"){
    await del("/channels/"+c)
-   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,text:"♻ All settings reset"})
+   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,text:"♻ Reset done",reply_markup:mainMenu})
   }
 
-  if(q.data.startsWith("f_")||q.data.startsWith("t_")||q.data.startsWith("s_")){
-   await set("/channels/"+c+"/"+q.data,true)
-   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,text:"✅ Setting enabled"})
+  if(d==="test"){
+   const l=await get("/last")
+   const bots=await get("/bots")||{}
+   if(l){
+    await react(TOKEN,l.chat,l.msg,[pick(POS)])
+    for(const k in bots)await react(bots[k].token,l.chat,l.msg,[pick(POS)])
+   }
   }
  }
 
@@ -132,23 +157,27 @@ export default async(req,res)=>{
   const chat=p.chat.id
   const msg=p.message_id
   const cfg=await get("/channels/"+chat)||{}
-  const txt=p.text||""
   const bots=await get("/bots")||{}
+  const txt=p.text||""
 
-  if(cfg.t_night && new Date().getHours()<6)return res.end("OK")
+  const h=new Date().getHours()
+  if(cfg.night_start!==undefined && cfg.night_end!==undefined){
+   if(h>=cfg.night_start && h<=cfg.night_end)return res.end("OK")
+  }
+
   if(cfg.f_text && !p.text)return res.end("OK")
   if(cfg.f_media && !p.photo && !p.video)return res.end("OK")
   if(cfg.f_poll && p.poll)return res.end("OK")
   if(cfg.f_fwd && p.forward_from)return res.end("OK")
-  if(cfg.t_prob && Math.random()>0.5)return res.end("OK")
+  if(cfg.prob && Math.random()*100>cfg.prob)return res.end("OK")
 
   let pack=cfg.mode==="neg"?NEG:cfg.mode==="pos"?POS:[...POS,...NEG]
-  if(cfg.s_link && /http/.test(txt))pack=["🔗","🌐","⚡"]
-  if(cfg.s_hash && /#/.test(txt))pack=["🏷","🔥","📢"]
-  if(cfg.s_len && txt.length>200)pack=["📝","🤓","👀"]
+  if(cfg.s_link && /http/.test(txt))pack=["🔗","🌐"]
+  if(cfg.s_hash && /#/.test(txt))pack=["🏷","🔥"]
+  if(cfg.s_len && txt.length>200)pack=["📝","👀"]
   if(cfg.s_pin && p.pinned_message)pack.push("🚀")
 
-  if(cfg.t_delay)await sleep(2000)
+  if(cfg.delay)await sleep(cfg.delay)
 
   await react(TOKEN,chat,msg,[pick(pack)])
   for(const k in bots)await react(bots[k].token,chat,msg,[pick(pack)])

@@ -129,13 +129,7 @@ export default async(req,res)=>{
    await api(TOKEN,"sendMessage",{chat_id:c,reply_to_message_id:m,parse_mode:"HTML",text:"🎲 Enter reaction probability 0-100",reply_markup:{force_reply:true}})
   }
 
-  if(d==="sec_smart")await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,parse_mode:"HTML",text:"<b>🎯 Smart Reaction Logic</b>\n\nAdvanced automatic behavior.",reply_markup:{
-   inline_keyboard:[
-    [{text:"🔗 React on Links",callback_data:"s_link"},{text:"#️⃣ Hashtag Mode",callback_data:"s_hash"}],
-    [{text:"📏 Text Length Logic",callback_data:"s_len"},{text:"📌 Pinned Boost",callback_data:"s_pin"}],
-    [{text:"⬅ Back",callback_data:"back"}]
-   ]
-  }})
+  
 
   if(d.startsWith("s_")){
    await set("/channels/"+c+"/"+d,true)

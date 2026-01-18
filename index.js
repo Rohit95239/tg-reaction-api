@@ -17,9 +17,10 @@ const react=(t,c,m,e)=>fetch("https://api.telegram.org/bot"+t+"/setMessageReacti
 
 const menu={
  inline_keyboard:[
-  [{text:"🎭 Reaction Mode",callback_data:"mode"},{text:"⚙ Filters",callback_data:"filter"}],
+  [{text:"▶ Enable",callback_data:"enable"},{text:"⏸ Pause",callback_data:"pause"}],
+  [{text:"🎭 Mode",callback_data:"mode"},{text:"⚙ Filters",callback_data:"filter"}],
   [{text:"⏱ Timing",callback_data:"time"},{text:"🔁 Control",callback_data:"control"}],
-  [{text:"🧪 Test Reaction",callback_data:"test"}]
+  [{text:"📊 Status",callback_data:"status"},{text:"🧪 Test",callback_data:"test"}]
  ]
 }
 
@@ -35,13 +36,13 @@ export default async(req,res)=>{
 
   if(txt==="/start"){
    await api(TOKEN,"sendMessage",{chat_id:c,reply_to_message_id:mid,parse_mode:"HTML",text:
-   "<b>🤖 Reaction Manager</b>\n\nAutomate professional looking reactions on channel posts.\n\nUse the control panel below 👇",reply_markup:menu})
+   "<b>🤖 Reaction Manager</b>\n\nReactions are <b>disabled</b> by default.\nEnable the bot to start automatic reactions.\n\nUse the panel below 👇",reply_markup:menu})
   }
 
   if(txt.startsWith("/add ")){
    const t=txt.split(" ")[1]
    if(t)await set("/bots/"+t.replace(/\W/g,""),{token:t})
-   await api(TOKEN,"sendMessage",{chat_id:c,reply_to_message_id:mid,parse_mode:"HTML",text:"<b>✅ Bot added</b>\n\nThis bot will now react automatically."})
+   await api(TOKEN,"sendMessage",{chat_id:c,reply_to_message_id:mid,parse_mode:"HTML",text:"<b>✅ Bot added</b>\n\nThis bot will also react when enabled."})
   }
 
   if(txt.startsWith("/remove ")){
@@ -60,14 +61,9 @@ export default async(req,res)=>{
    await api(TOKEN,"sendMessage",{chat_id:c,reply_to_message_id:mid,parse_mode:"HTML",text:"<b>✅ Probability saved</b>",reply_markup:menu})
   }
 
-  if(reply==="🌙 Night mode start hour"){
-   await set("/channels/"+c,{night_start:parseInt(txt)})
-   await api(TOKEN,"sendMessage",{chat_id:c,reply_to_message_id:mid,parse_mode:"HTML",text:"🌙 Night mode end hour",reply_markup:{force_reply:true}})
-  }
-
-  if(reply==="🌙 Night mode end hour"){
-   await set("/channels/"+c,{night_end:parseInt(txt)})
-   await api(TOKEN,"sendMessage",{chat_id:c,reply_to_message_id:mid,parse_mode:"HTML",text:"<b>🌙 Night mode enabled</b>",reply_markup:menu})
+  if(reply==="🔢 Enter reaction count (1-5)"){
+   await set("/channels/"+c,{count:Math.max(1,Math.min(5,parseInt(txt)))})
+   await api(TOKEN,"sendMessage",{chat_id:c,reply_to_message_id:mid,parse_mode:"HTML",text:"<b>✅ Reaction count saved</b>",reply_markup:menu})
   }
  }
 
@@ -77,68 +73,78 @@ export default async(req,res)=>{
   const m=q.message.message_id
   const d=q.data
 
-  const back={inline_keyboard:[[ {text:"⬅ Back",callback_data:"back"} ]]}
+  const alert=t=>api(TOKEN,"answerCallbackQuery",{callback_query_id:q.id,text:t,show_alert:true})
 
-  if(d==="back")await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,parse_mode:"HTML",text:"<b>🤖 Reaction Manager</b>\n\nChoose an option below.",reply_markup:menu})
+  if(d==="enable"){
+   await set("/channels/"+c,{enabled:true})
+   await alert("Reactions enabled")
+   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,parse_mode:"HTML",text:"▶ <b>Bot Enabled</b>",reply_markup:menu})
+  }
 
-  if(d==="mode")await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,parse_mode:"HTML",text:
-   "<b>🎭 Reaction Type</b>\n\nChoose reaction emotion style.",reply_markup:{
+  if(d==="pause"){
+   await set("/channels/"+c,{enabled:false})
+   await alert("Reactions paused")
+   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,parse_mode:"HTML",text:"⏸ <b>Bot Paused</b>\n\nNo reactions will be sent.",reply_markup:menu})
+  }
+
+  if(d==="mode"){
+   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,parse_mode:"HTML",text:"🎭 <b>Reaction Mode</b>",reply_markup:{
     inline_keyboard:[
      [{text:"😊 Positive",callback_data:"mode_pos"},{text:"😈 Negative",callback_data:"mode_neg"}],
      [{text:"🎭 Mixed",callback_data:"mode_mix"}],
      [{text:"⬅ Back",callback_data:"back"}]
     ]
    }})
+  }
 
   if(d.startsWith("mode_")){
    await set("/channels/"+c,{mode:d.split("_")[1]})
-   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,parse_mode:"HTML",text:"<b>✅ Mode saved</b>",reply_markup:back})
+   await alert("Mode updated")
+   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,parse_mode:"HTML",text:"<b>✅ Mode saved</b>",reply_markup:menu})
   }
 
-  if(d==="filter")await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,parse_mode:"HTML",text:
-   "<b>⚙ Content Filters</b>\n\nControl what posts get reactions.",reply_markup:{
+  if(d==="time"){
+   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,parse_mode:"HTML",text:"⏱ <b>Timing Settings</b>",reply_markup:{
     inline_keyboard:[
-     [{text:"📝 Text only",callback_data:"f_text"},{text:"🖼 Media only",callback_data:"f_media"}],
-     [{text:"📊 Skip polls",callback_data:"f_poll"}],
+     [{text:"⏳ Delay",callback_data:"set_delay"},{text:"🎲 Probability",callback_data:"set_prob"}],
+     [{text:"🔢 Reaction Count",callback_data:"set_count"}],
      [{text:"⬅ Back",callback_data:"back"}]
     ]
    }})
-
-  if(d.startsWith("f_")){
-   await set("/channels/"+c,{[d]:true})
-   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,parse_mode:"HTML",text:"<b>✅ Filter enabled</b>",reply_markup:back})
   }
-
-  if(d==="time")await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,parse_mode:"HTML",text:
-   "<b>⏱ Timing Settings</b>\n\nMake reactions look natural.",reply_markup:{
-    inline_keyboard:[
-     [{text:"⏳ Reaction delay",callback_data:"set_delay"},{text:"🎲 Probability",callback_data:"set_prob"}],
-     [{text:"🌙 Night mode",callback_data:"set_night"}],
-     [{text:"⬅ Back",callback_data:"back"}]
-    ]
-   }})
 
   if(d==="set_delay")await api(TOKEN,"sendMessage",{chat_id:c,reply_to_message_id:m,parse_mode:"HTML",text:"⏳ Enter reaction delay (seconds)",reply_markup:{force_reply:true}})
   if(d==="set_prob")await api(TOKEN,"sendMessage",{chat_id:c,reply_to_message_id:m,parse_mode:"HTML",text:"🎲 Enter reaction probability (0-100)",reply_markup:{force_reply:true}})
-  if(d==="set_night")await api(TOKEN,"sendMessage",{chat_id:c,reply_to_message_id:m,parse_mode:"HTML",text:"🌙 Night mode start hour",reply_markup:{force_reply:true}})
+  if(d==="set_count")await api(TOKEN,"sendMessage",{chat_id:c,reply_to_message_id:m,parse_mode:"HTML",text:"🔢 Enter reaction count (1-5)",reply_markup:{force_reply:true}})
 
-  if(d==="control")await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,parse_mode:"HTML",text:
-   "<b>🔁 Reaction Control</b>\n\nPause or resume reactions.",reply_markup:{
-    inline_keyboard:[
-     [{text:"▶ Enable",callback_data:"enable"},{text:"⏸ Pause",callback_data:"pause"}],
-     [{text:"⬅ Back",callback_data:"back"}]
-    ]
-   }})
+  if(d==="status"){
+   const cfg=await get("/channels/"+c)||{}
+   await alert("Status loaded")
+   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,parse_mode:"HTML",text:
+   "<b>📊 Bot Status</b>\n\n"+
+   "Enabled: "+(cfg.enabled?"Yes":"No")+"\n"+
+   "Mode: "+(cfg.mode||"Mixed")+"\n"+
+   "Delay: "+((cfg.delay||0)/1000)+"s\n"+
+   "Probability: "+(cfg.prob||100)+"%\n"+
+   "Reactions/Post: "+(cfg.count||1),
+   reply_markup:menu})
+  }
 
-  if(d==="enable"){await set("/channels/"+c,{enabled:true});await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,parse_mode:"HTML",text:"<b>▶ Reactions enabled</b>",reply_markup:back})}
-  if(d==="pause"){await set("/channels/"+c,{enabled:false});await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,parse_mode:"HTML",text:"<b>⏸ Reactions paused</b>",reply_markup:back})}
+  if(d==="back"){
+   await api(TOKEN,"editMessageText",{chat_id:c,message_id:m,parse_mode:"HTML",text:"<b>🤖 Reaction Manager</b>",reply_markup:menu})
+  }
 
   if(d==="test"){
+   const cfg=await get("/channels/"+c)||{}
+   if(cfg.enabled!==true)return alert("Bot is paused")
    const l=await get("/last")
    const bots=await get("/bots")||{}
    if(l){
-    await react(TOKEN,l.chat,l.msg,[pick(POS)])
-    for(const k in bots)await react(bots[k].token,l.chat,l.msg,[pick(POS)])
+    const pack=cfg.mode==="neg"?NEG:cfg.mode==="pos"?POS:[...POS,...NEG]
+    const cnt=cfg.count||1
+    const emojis=Array.from({length:cnt},()=>pick(pack))
+    await react(TOKEN,l.chat,l.msg,emojis)
+    for(const k in bots)await react(bots[k].token,l.chat,l.msg,emojis)
    }
   }
  }
@@ -149,24 +155,22 @@ export default async(req,res)=>{
   const msg=p.message_id
   const cfg=await get("/channels/"+chat)||{}
   const bots=await get("/bots")||{}
-  const txt=p.text||""
 
-  if(cfg.enabled===false)return res.end("OK")
-  if(cfg.f_text && !p.text)return res.end("OK")
-  if(cfg.f_media && !p.photo && !p.video)return res.end("OK")
-  if(cfg.f_poll && p.poll)return res.end("OK")
+  if(cfg.enabled!==true)return res.end("OK")
   if(cfg.prob && Math.random()*100>cfg.prob)return res.end("OK")
 
-  if(cfg.night_start!==undefined && cfg.night_end!==undefined){
-   const h=new Date().getHours()
-   if(h>=cfg.night_start && h<=cfg.night_end)return res.end("OK")
-  }
-
-  let pack=cfg.mode==="neg"?NEG:cfg.mode==="pos"?POS:[...POS,...NEG]
   if(cfg.delay)await sleep(cfg.delay)
 
-  await react(TOKEN,chat,msg,[pick(pack)])
-  for(const k in bots)await react(bots[k].token,chat,msg,[pick(pack)])
+  const pack=cfg.mode==="neg"?NEG:cfg.mode==="pos"?POS:[...POS,...NEG]
+  const cnt=cfg.count||1
+  const emojis=Array.from({length:cnt},()=>pick(pack))
+
+  try{
+   await react(TOKEN,chat,msg,emojis)
+   for(const k in bots)await react(bots[k].token,chat,msg,emojis)
+  }catch(e){
+   await set("/channels/"+chat,{enabled:false})
+  }
 
   await set("/last",{chat,msg})
  }

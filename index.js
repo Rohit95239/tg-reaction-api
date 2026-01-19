@@ -53,6 +53,10 @@ function getLatestMessage(token, chatId) {
   });
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export default async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -62,22 +66,61 @@ export default async (req, res) => {
     return res.status(200).end();
   }
 
-  const { query } = parse(req.url, true);
+  const { query, pathname } = parse(req.url, true);
+
+  if (pathname === '/health' || pathname === '/ping') {
+    return res.status(200).json({ status: 'ok', timestamp: Date.now() });
+  }
+
+  if (pathname === '/help' || pathname === '/docs') {
+    return res.status(200).json({
+      api: 'Telegram Reaction Bot API',
+      version: '2.0',
+      endpoints: {
+        '/': 'Main endpoint for sending reactions',
+        '/health': 'Health check endpoint',
+        '/help': 'API documentation'
+      },
+      parameters: {
+        token: 'Bot tokens (comma-separated) - Required',
+        chat: 'Chat IDs (comma-separated) - Required',
+        message: 'Message IDs (comma-separated) - Optional, auto-fetches if not provided',
+        reaction: 'Reaction type: positive, negative, mix - Default: mix',
+        delay: 'Delay between reactions in milliseconds - Default: 0',
+        big: 'Send big reactions (true/false) - Default: false',
+        remove: 'Remove reactions instead of adding (true/false) - Default: false',
+        unique: 'Ensure unique reactions per message (true/false) - Default: true',
+        count: 'Number of reactions per bot (1-3) - Default: 1'
+      },
+      examples: [
+        '/?token=TOKEN1,TOKEN2&chat=-1001234567890&reaction=positive',
+        '/?token=TOKEN&chat=CHAT1,CHAT2&message=123&reaction=mix&delay=1000',
+        '/?token=TOKEN&chat=CHAT&message=123&remove=true',
+        '/?token=TOKEN&chat=CHAT&reaction=positive&big=true&count=2'
+      ]
+    });
+  }
+
   const tokens = query.token ? query.token.split(',').map(t => t.trim()) : [];
   const chatIds = query.chat ? query.chat.split(',').map(c => c.trim()) : [];
   let messageIds = query.message ? query.message.split(',').map(m => m.trim()) : [];
   const reactType = query.reaction || query.react || 'mix';
+  const delayMs = parseInt(query.delay) || 0;
+  const isBig = query.big === 'true';
+  const removeReaction = query.remove === 'true';
+  const uniqueReactions = query.unique !== 'false';
+  const reactionCount = Math.min(Math.max(parseInt(query.count) || 1, 1), 3);
 
   if (!tokens.length) {
-    return res.status(400).json({ error: 'No bot tokens provided' });
+    return res.status(400).json({ error: 'No bot tokens provided', help: '/help' });
   }
 
   if (!chatIds.length) {
-    return res.status(400).json({ error: 'No chat IDs provided' });
+    return res.status(400).json({ error: 'No chat IDs provided', help: '/help' });
   }
 
   if (!['positive', 'negative', 'mix'].includes(reactType)) {
-    return res.status(400).json({ error: 'Invalid reaction type. Use: positive, negative, or mix' });
+    return res.status(400).json({ error: 'Invalid reaction type. Use: positive, negative, or mix', help: '/help' });
   }
 
   if (!messageIds.length) {
@@ -103,41 +146,62 @@ export default async (req, res) => {
       
       tokens.forEach(token => {
         validMessages.forEach(({ chatId, messageId }) => {
-          const key = `${chatId}-${messageId}`;
-          if (!usedReactions.has(key)) {
-            usedReactions.set(key, new Set());
+          for (let i = 0; i < reactionCount; i++) {
+            const key = `${chatId}-${messageId}`;
+            if (!usedReactions.has(key)) {
+              usedReactions.set(key, new Set());
+            }
+            
+            let reaction = getRandomReaction(reactType);
+            const usedSet = usedReactions.get(key);
+            let attempts = 0;
+            const maxPool = reactType === 'positive' ? positiveReactions.length : 
+                            reactType === 'negative' ? negativeReactions.length : allReactions.length;
+            
+            if (uniqueReactions) {
+              while (usedSet.has(reaction) && usedSet.size < maxPool && attempts < 100) {
+                reaction = getRandomReaction(reactType);
+                attempts++;
+              }
+              usedSet.add(reaction);
+            }
+            
+            combinations.push({ token, chatId, messageId, reaction });
           }
-          
-          let reaction = getRandomReaction(reactType);
-          const usedSet = usedReactions.get(key);
-          let attempts = 0;
-          const maxPool = reactType === 'positive' ? positiveReactions.length : 
-                          reactType === 'negative' ? negativeReactions.length : allReactions.length;
-          
-          while (usedSet.has(reaction) && usedSet.size < maxPool && attempts < 100) {
-            reaction = getRandomReaction(reactType);
-            attempts++;
-          }
-          
-          usedSet.add(reaction);
-          combinations.push({ token, chatId, messageId, reaction });
         });
       });
       
-      const results = await Promise.allSettled(
-        combinations.map(combo => makeRequest(combo.token, combo.chatId, combo.messageId, combo.reaction))
-      );
+      const results = [];
+      for (let i = 0; i < combinations.length; i++) {
+        const combo = combinations[i];
+        try {
+          if (delayMs > 0 && i > 0) await sleep(delayMs);
+          const result = await makeRequest(combo.token, combo.chatId, combo.messageId, combo.reaction, isBig, removeReaction);
+          results.push({
+            token: combo.token,
+            chat_id: combo.chatId,
+            message_id: combo.messageId,
+            reaction: combo.reaction,
+            status: 'fulfilled',
+            data: result
+          });
+        } catch (error) {
+          results.push({
+            token: combo.token,
+            chat_id: combo.chatId,
+            message_id: combo.messageId,
+            reaction: combo.reaction,
+            status: 'rejected',
+            data: error.message || error
+          });
+        }
+      }
 
-      const response = results.map((result, index) => ({
-        token: combinations[index].token,
-        chat_id: combinations[index].chatId,
-        message_id: combinations[index].messageId,
-        reaction: combinations[index].reaction,
-        status: result.status,
-        data: result.status === 'fulfilled' ? result.value : result.reason
-      }));
-
-      return res.status(200).json({ results: response });
+      return res.status(200).json({ 
+        success: true,
+        total: results.length,
+        results: results 
+      });
       
     } catch (error) {
       return res.status(400).json({ error: 'Error fetching messages', details: error.message });
@@ -150,51 +214,72 @@ export default async (req, res) => {
   tokens.forEach(token => {
     chatIds.forEach(chatId => {
       messageIds.forEach(messageId => {
-        const key = `${chatId}-${messageId}`;
-        if (!usedReactions.has(key)) {
-          usedReactions.set(key, new Set());
+        for (let i = 0; i < reactionCount; i++) {
+          const key = `${chatId}-${messageId}`;
+          if (!usedReactions.has(key)) {
+            usedReactions.set(key, new Set());
+          }
+          
+          let reaction = getRandomReaction(reactType);
+          const usedSet = usedReactions.get(key);
+          let attempts = 0;
+          const maxPool = reactType === 'positive' ? positiveReactions.length : 
+                          reactType === 'negative' ? negativeReactions.length : allReactions.length;
+          
+          if (uniqueReactions) {
+            while (usedSet.has(reaction) && usedSet.size < maxPool && attempts < 100) {
+              reaction = getRandomReaction(reactType);
+              attempts++;
+            }
+            usedSet.add(reaction);
+          }
+          
+          combinations.push({ token, chatId, messageId, reaction });
         }
-        
-        let reaction = getRandomReaction(reactType);
-        const usedSet = usedReactions.get(key);
-        let attempts = 0;
-        const maxPool = reactType === 'positive' ? positiveReactions.length : 
-                        reactType === 'negative' ? negativeReactions.length : allReactions.length;
-        
-        while (usedSet.has(reaction) && usedSet.size < maxPool && attempts < 100) {
-          reaction = getRandomReaction(reactType);
-          attempts++;
-        }
-        
-        usedSet.add(reaction);
-        combinations.push({ token, chatId, messageId, reaction });
       });
     });
   });
 
-  const results = await Promise.allSettled(
-    combinations.map(combo => makeRequest(combo.token, combo.chatId, combo.messageId, combo.reaction))
-  );
+  const results = [];
+  for (let i = 0; i < combinations.length; i++) {
+    const combo = combinations[i];
+    try {
+      if (delayMs > 0 && i > 0) await sleep(delayMs);
+      const result = await makeRequest(combo.token, combo.chatId, combo.messageId, combo.reaction, isBig, removeReaction);
+      results.push({
+        token: combo.token,
+        chat_id: combo.chatId,
+        message_id: combo.messageId,
+        reaction: combo.reaction,
+        status: 'fulfilled',
+        data: result
+      });
+    } catch (error) {
+      results.push({
+        token: combo.token,
+        chat_id: combo.chatId,
+        message_id: combo.messageId,
+        reaction: combo.reaction,
+        status: 'rejected',
+        data: error.message || error
+      });
+    }
+  }
 
-  const response = results.map((result, index) => ({
-    token: combinations[index].token,
-    chat_id: combinations[index].chatId,
-    message_id: combinations[index].messageId,
-    reaction: combinations[index].reaction,
-    status: result.status,
-    data: result.status === 'fulfilled' ? result.value : result.reason
-  }));
-
-  res.status(200).json({ results: response });
+  res.status(200).json({ 
+    success: true,
+    total: results.length,
+    results: results 
+  });
 };
 
-function makeRequest(token, chatId, messageId, reaction) {
+function makeRequest(token, chatId, messageId, reaction, isBig, remove) {
   return new Promise((resolve, reject) => {
     const payload = {
       chat_id: chatId,
       message_id: parseInt(messageId),
-      reaction: [{ type: "emoji", emoji: reaction }],
-      is_big: false
+      reaction: remove ? [] : [{ type: "emoji", emoji: reaction }],
+      is_big: isBig
     };
     const postData = JSON.stringify(payload);
     const options = {
@@ -223,4 +308,4 @@ function makeRequest(token, chatId, messageId, reaction) {
     request.write(postData);
     request.end();
   });
-}
+                                           }

@@ -17,12 +17,7 @@ function getRandomReaction(type) {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-function getChannelUsername(url) {
-  const match = url.match(/t\.me\/([^\/]+)/);
-  return match ? '@' + match[1] : null;
-}
-
-function getChannelUpdates(token, channelUsername) {
+function getLatestMessage(token, chatId) {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: 'api.telegram.org',
@@ -39,13 +34,14 @@ function getChannelUpdates(token, channelUsername) {
           if (result.ok && result.result.length > 0) {
             for (let i = result.result.length - 1; i >= 0; i--) {
               const update = result.result[i];
-              if (update.channel_post && update.channel_post.chat.username === channelUsername.replace('@', '')) {
-                resolve(update.channel_post.message_id);
+              const message = update.channel_post || update.message;
+              if (message && message.chat.id.toString() === chatId.toString()) {
+                resolve(message.message_id);
                 return;
               }
             }
           }
-          reject(new Error('No message found in channel'));
+          reject(new Error('No message found in chat'));
         } catch (e) {
           reject(e);
         }
@@ -70,49 +66,34 @@ export default async (req, res) => {
   const tokens = query.token ? query.token.split(',').map(t => t.trim()) : [];
   const chatIds = query.chat ? query.chat.split(',').map(c => c.trim()) : [];
   let messageIds = query.message ? query.message.split(',').map(m => m.trim()) : [];
-  const channelUrl = query.channel;
   const reactType = query.reaction || query.react || 'mix';
 
   if (!tokens.length) {
     return res.status(400).json({ error: 'No bot tokens provided' });
   }
 
-  if (!chatIds.length && !channelUrl) {
-    return res.status(400).json({ error: 'No chat IDs or channel URL provided' });
+  if (!chatIds.length) {
+    return res.status(400).json({ error: 'No chat IDs provided' });
   }
 
   if (!['positive', 'negative', 'mix'].includes(reactType)) {
     return res.status(400).json({ error: 'Invalid reaction type. Use: positive, negative, or mix' });
   }
 
-  let finalChatIds = chatIds;
-  
-  if (channelUrl) {
-    const channelUsername = getChannelUsername(channelUrl);
-    if (!channelUsername) {
-      return res.status(400).json({ error: 'Invalid channel URL' });
-    }
-    finalChatIds = [channelUsername];
-
-    if (!messageIds.length) {
-      try {
-        const latestMessageId = await getChannelUpdates(tokens[0], channelUsername);
-        messageIds = [latestMessageId.toString()];
-      } catch (error) {
-        return res.status(400).json({ error: 'Could not fetch latest message from channel', details: error.message });
-      }
-    }
-  }
-
   if (!messageIds.length) {
-    return res.status(400).json({ error: 'No message IDs provided or found' });
+    try {
+      const latestMessageId = await getLatestMessage(tokens[0], chatIds[0]);
+      messageIds = [latestMessageId.toString()];
+    } catch (error) {
+      return res.status(400).json({ error: 'Could not fetch latest message from chat', details: error.message });
+    }
   }
 
   const usedReactions = new Map();
   const combinations = [];
   
   tokens.forEach(token => {
-    finalChatIds.forEach(chatId => {
+    chatIds.forEach(chatId => {
       messageIds.forEach(messageId => {
         const key = `${chatId}-${messageId}`;
         if (!usedReactions.has(key)) {

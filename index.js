@@ -81,11 +81,66 @@ export default async (req, res) => {
   }
 
   if (!messageIds.length) {
+    const fetchPromises = [];
+    chatIds.forEach(chatId => {
+      fetchPromises.push(
+        getLatestMessage(tokens[0], chatId)
+          .then(msgId => ({ chatId, messageId: msgId.toString() }))
+          .catch(() => ({ chatId, messageId: null }))
+      );
+    });
+    
     try {
-      const latestMessageId = await getLatestMessage(tokens[0], chatIds[0]);
-      messageIds = [latestMessageId.toString()];
+      const fetchedMessages = await Promise.all(fetchPromises);
+      const validMessages = fetchedMessages.filter(m => m.messageId !== null);
+      
+      if (validMessages.length === 0) {
+        return res.status(400).json({ error: 'Could not fetch latest messages from any chat' });
+      }
+      
+      const usedReactions = new Map();
+      const combinations = [];
+      
+      tokens.forEach(token => {
+        validMessages.forEach(({ chatId, messageId }) => {
+          const key = `${chatId}-${messageId}`;
+          if (!usedReactions.has(key)) {
+            usedReactions.set(key, new Set());
+          }
+          
+          let reaction = getRandomReaction(reactType);
+          const usedSet = usedReactions.get(key);
+          let attempts = 0;
+          const maxPool = reactType === 'positive' ? positiveReactions.length : 
+                          reactType === 'negative' ? negativeReactions.length : allReactions.length;
+          
+          while (usedSet.has(reaction) && usedSet.size < maxPool && attempts < 100) {
+            reaction = getRandomReaction(reactType);
+            attempts++;
+          }
+          
+          usedSet.add(reaction);
+          combinations.push({ token, chatId, messageId, reaction });
+        });
+      });
+      
+      const results = await Promise.allSettled(
+        combinations.map(combo => makeRequest(combo.token, combo.chatId, combo.messageId, combo.reaction))
+      );
+
+      const response = results.map((result, index) => ({
+        token: combinations[index].token,
+        chat_id: combinations[index].chatId,
+        message_id: combinations[index].messageId,
+        reaction: combinations[index].reaction,
+        status: result.status,
+        data: result.status === 'fulfilled' ? result.value : result.reason
+      }));
+
+      return res.status(200).json({ results: response });
+      
     } catch (error) {
-      return res.status(400).json({ error: 'Could not fetch latest message from chat', details: error.message });
+      return res.status(400).json({ error: 'Error fetching messages', details: error.message });
     }
   }
 

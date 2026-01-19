@@ -12,9 +12,14 @@ export default async (req, res) => {
 
   const { query } = parse(req.url, true);
   const tokens = query.token ? query.token.split(',').map(t => t.trim()) : [];
+  const chatIds = query.chat ? query.chat.split(',').map(c => c.trim()) : [];
 
   if (!tokens.length) {
     return res.status(400).json({ error: 'No bot tokens provided' });
+  }
+
+  if (!chatIds.length) {
+    return res.status(400).json({ error: 'No chat IDs provided' });
   }
 
   const body = await new Promise((resolve) => {
@@ -30,12 +35,20 @@ export default async (req, res) => {
     return res.status(400).json({ error: 'Invalid JSON' });
   }
 
+  const combinations = [];
+  tokens.forEach(token => {
+    chatIds.forEach(chatId => {
+      combinations.push({ token, chatId });
+    });
+  });
+
   const results = await Promise.allSettled(
-    tokens.map(token => makeRequest(token, requestData))
+    combinations.map(combo => makeRequest(combo.token, combo.chatId, requestData))
   );
 
   const response = results.map((result, index) => ({
-    token: tokens[index],
+    token: combinations[index].token,
+    chat_id: combinations[index].chatId,
     status: result.status,
     data: result.status === 'fulfilled' ? result.value : result.reason
   }));
@@ -43,9 +56,10 @@ export default async (req, res) => {
   res.status(200).json({ results: response });
 };
 
-function makeRequest(token, data) {
+function makeRequest(token, chatId, data) {
   return new Promise((resolve, reject) => {
-    const postData = JSON.stringify(data);
+    const payload = { ...data, chat_id: chatId };
+    const postData = JSON.stringify(payload);
     const options = {
       hostname: 'api.telegram.org',
       path: `/bot${token}/setMessageReaction`,

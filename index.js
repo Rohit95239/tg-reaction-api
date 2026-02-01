@@ -1,5 +1,4 @@
 import https from 'https';
-import { parse } from 'url';
 
 const positiveReactions = ["👍", "❤", "🔥", "🥰", "👏", "😁", "🎉", "🤩", "🙏", "👌", "🕊", "😍", "🐳", "❤‍🔥", "🌭", "💯", "🤣", "⚡", "🍌", "🏆", "😘", "🍓", "🍾", "💋", "😇", "🤝", "✍", "🤗", "🫡", "🎅", "🎄", "☃", "🆒", "💘", "🦄", "😎"];
 const negativeReactions = ["👎", "🤔", "🤯", "😱", "🤬", "😢", "🤮", "💩", "🤡", "🥱", "🥴", "💔", "🤨", "😐", "🖕", "😈", "😴", "😭", "😨", "🙈", "🙉", "🙊", "😡", "🗿"];
@@ -53,6 +52,43 @@ function getLatestMessage(token, chatId) {
   });
 }
 
+function makeRequest(token, chatId, messageId, reaction) {
+  return new Promise((resolve, reject) => {
+    const payload = {
+      chat_id: chatId,
+      message_id: parseInt(messageId),
+      reaction: [{ type: "emoji", emoji: reaction }],
+      is_big: false
+    };
+    const postData = JSON.stringify(payload);
+    const options = {
+      hostname: 'api.telegram.org',
+      path: `/bot${token}/setMessageReaction`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
+
+    const request = https.request(options, (response) => {
+      let responseData = '';
+      response.on('data', chunk => responseData += chunk);
+      response.on('end', () => {
+        try {
+          resolve(JSON.parse(responseData));
+        } catch (e) {
+          resolve(responseData);
+        }
+      });
+    });
+
+    request.on('error', reject);
+    request.write(postData);
+    request.end();
+  });
+}
+
 export default async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -62,7 +98,9 @@ export default async (req, res) => {
     return res.status(200).end();
   }
 
-  const { query } = parse(req.url, true);
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const query = Object.fromEntries(url.searchParams);
+  
   const tokens = query.token ? query.token.split(',').map(t => t.trim()) : [];
   const chatIds = query.chat ? query.chat.split(',').map(c => c.trim()) : [];
   let messageIds = query.message ? query.message.split(',').map(m => m.trim()) : [];
@@ -97,6 +135,8 @@ export default async (req, res) => {
       if (validMessages.length === 0) {
         return res.status(400).json({ error: 'Could not fetch latest messages from any chat' });
       }
+      
+      messageIds = validMessages.map(m => m.messageId);
       
       const usedReactions = new Map();
       const combinations = [];
@@ -187,40 +227,3 @@ export default async (req, res) => {
 
   res.status(200).json({ results: response });
 };
-
-function makeRequest(token, chatId, messageId, reaction) {
-  return new Promise((resolve, reject) => {
-    const payload = {
-      chat_id: chatId,
-      message_id: parseInt(messageId),
-      reaction: [{ type: "emoji", emoji: reaction }],
-      is_big: false
-    };
-    const postData = JSON.stringify(payload);
-    const options = {
-      hostname: 'api.telegram.org',
-      path: `/bot${token}/setMessageReaction`,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData)
-      }
-    };
-
-    const request = https.request(options, (response) => {
-      let responseData = '';
-      response.on('data', chunk => responseData += chunk);
-      response.on('end', () => {
-        try {
-          resolve(JSON.parse(responseData));
-        } catch (e) {
-          resolve(responseData);
-        }
-      });
-    });
-
-    request.on('error', reject);
-    request.write(postData);
-    request.end();
-  });
-    }

@@ -16,11 +16,11 @@ function getRandomReaction(type) {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-function getLatestMessage(token, chatId) {
+function tryGetMessageId(token, chatId, offset = -1) {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: 'api.telegram.org',
-      path: `/bot${token}/getUpdates?limit=100&allowed_updates=["message","channel_post"]`,
+      path: `/bot${token}/getUpdates?offset=${offset}&limit=100`,
       method: 'GET'
     };
 
@@ -31,20 +31,16 @@ function getLatestMessage(token, chatId) {
         try {
           const result = JSON.parse(data);
           if (result.ok && result.result.length > 0) {
-            const updates = result.result.reverse();
-            for (const update of updates) {
-              const message = update.channel_post || update.message;
-              if (message) {
-                const msgChatId = message.chat.id.toString();
-                const targetChatId = chatId.toString();
-                if (msgChatId === targetChatId) {
-                  resolve(message.message_id);
-                  return;
-                }
+            for (let i = result.result.length - 1; i >= 0; i--) {
+              const update = result.result[i];
+              const message = update.channel_post || update.message || update.edited_channel_post || update.edited_message;
+              if (message && message.chat && message.chat.id.toString() === chatId.toString()) {
+                resolve(message.message_id);
+                return;
               }
             }
           }
-          reject(new Error(`No message found for chat ${chatId}`));
+          reject(new Error('No matching message found'));
         } catch (e) {
           reject(e);
         }
@@ -54,10 +50,32 @@ function getLatestMessage(token, chatId) {
     request.on('error', reject);
     request.setTimeout(10000, () => {
       request.destroy();
-      reject(new Error('Request timeout'));
+      reject(new Error('Timeout'));
     });
     request.end();
   });
+}
+
+async function findMessageId(tokens, chatId) {
+  for (const token of tokens) {
+    try {
+      const messageId = await tryGetMessageId(token, chatId, -1);
+      return messageId;
+    } catch (e) {
+      continue;
+    }
+  }
+  
+  for (const token of tokens) {
+    try {
+      const messageId = await tryGetMessageId(token, chatId, 0);
+      return messageId;
+    } catch (e) {
+      continue;
+    }
+  }
+  
+  throw new Error(`Could not find message in chat ${chatId}`);
 }
 
 function makeRequest(token, chatId, messageId, reaction) {
@@ -135,17 +153,17 @@ export default async (req, res) => {
     
     for (const chatId of chatIds) {
       try {
-        const messageId = await getLatestMessage(tokens[0], chatId);
+        const messageId = await findMessageId(tokens, chatId);
         chatMessageMap.set(chatId, messageId.toString());
       } catch (error) {
-        console.error(`Failed to get message for chat ${chatId}:`, error.message);
+        console.error(`Failed to find message for chat ${chatId}:`, error.message);
       }
     }
     
     if (chatMessageMap.size === 0) {
       return res.status(400).json({ 
-        error: 'Could not fetch latest messages from any chat',
-        hint: 'Make sure the bot has received at least one message in the chat and has access to message history'
+        error: 'Could not find any messages in the specified chats',
+        hint: 'Please provide message IDs manually using &message=123456 parameter'
       });
     }
 
